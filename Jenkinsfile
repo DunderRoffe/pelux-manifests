@@ -14,7 +14,7 @@ def buildManifest = {String manifest, String bitbake_image ->
             sh 'git submodule update --init'
         }
 
-        stage('StartVM and Build') {
+        stage('Start Vagrant') {
             // Calculate available amount of RAM
             String gigsramStr = sh (
                 script: 'free -tg | tail -n1 | awk \'{ print $2 }\'',
@@ -31,8 +31,23 @@ def buildManifest = {String manifest, String bitbake_image ->
             sh "cd ${workspace}"
             sh "vagrant destroy -f || true"
             withEnv(["VAGRANT_RAM=${gigsram}"]) {
-                sh "cd ${workspace} && MANIFEST=${manifest} BITBAKE_IMAGE=${bitbake_image} vagrant up"
+                sh "vagrant up"
             }
+        }
+
+        stage('Repo init') {
+            sh "vagrant ssh -c \"/vagrant/ci_scripts/do_repo_init ${manifest}\""
+        }
+
+        stage('Setup TEMPLATECONF') {
+            String bsp = manifest.split('-')[1].split(".")[0]
+            withEnv(["TEMPLATECONF" => "/home/vagrant/pelux_yocto/sources/meta-pelux-bsp-${bsp}/conf") {
+                sh "vagrant ssh -c \"/vagrant/vagrant-cookbook/yocto/fetch-sources-for-recipes.sh\""
+            }
+        }
+
+        stage('Bitbake image') {
+            sh "vagrant ssh -c \"/vagrant/vagrant-cookbook/yocto/build-images.sh ${bitbake_image}\""
         }
     }
 
