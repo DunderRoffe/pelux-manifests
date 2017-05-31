@@ -28,9 +28,9 @@ def buildManifest = {String manifest, String bitbake_image ->
             }
 
             // Start the machine (destroy it if present) and provision it
-            sh "cd ${workspace} && MANIFEST=${manifest} BITBAKE_IMAGE=${bitbake_image} vagrant destroy -f || true"
-            withEnv(["VAGRANT_RAM=${gigsram}",
-                     "APT_CACHE_SERVER=10.8.36.16"]) {
+            sh "cd ${workspace}"
+            sh "vagrant destroy -f || true"
+            withEnv(["VAGRANT_RAM=${gigsram}"]) {
                 sh "cd ${workspace} && MANIFEST=${manifest} BITBAKE_IMAGE=${bitbake_image} vagrant up"
             }
         }
@@ -48,7 +48,7 @@ def buildManifest = {String manifest, String bitbake_image ->
 
     // Always try to shut down the machine
     // Shutdown the machine
-    sh "cd ${workspace} && MANIFEST=${manifest} BITBAKE_IMAGE=${bitbake_image} vagrant destroy -f || true"
+    sh "vagrant destroy -f || true"
 }
 
 node {
