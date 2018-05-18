@@ -17,13 +17,18 @@ void checkoutWithSubmodules() {
 }
 
 // Start the machine (destroy it if present) and provision it
-void startVagrant(boolean kill=true) {
-    stage("Start vagrant") {
-        if (kill) {
-            shutdownVagrant()
-        }
+void runInVagrant(Closure functionToRunInVagrant, boolean kill=true) {
+    try {
+        stage("Start vagrant") {
+            if (kill) {
+                shutdownVagrant()
+            }
 
-        sh "vagrant up"
+            sh "vagrant up"
+        }
+        functionToRunInVagrant()
+    } finally {
+        shutdownVagrant()
     }
 }
 
@@ -147,28 +152,9 @@ void buildWithLayer(String variantName, String imageName, String layer, String l
     // We can't do "checkout scm" here since pelux-manifests is not the
     // canonical repo here.
     sh "git submodule update --init"
-    try {
-        // Initialize vagrant and repo manifest
-        startVagrant()
-        repoInit(manifest)
-
-        replaceLayer(yoctoDir, layer, layerPath)
-
-        // Setup yocto
-        String templateConf="${yoctoDir}/sources/meta-pelux/conf/variant/${variantName}"
-        setupBitbake(yoctoDir, templateConf)
-        setupCache(yoctoDir, env.YOCTO_CACHE_URL)
-
-        // Build the images
-        try {
-            buildImageAndSDK(yoctoDir, imageName)
-        } finally { // Archive cache even if there were errors.
-            boolean archive = env.ARCHIVE_CACHE == "true"
-            archiveCache(yoctoDir, archive, env.YOCTO_CACHE_ARCHIVE_PATH)
-        }
-    } finally {
-        shutdownVagrant()
-    }
+    runInVagrant({
+        innerBuildManifest(variantName, imageName, yoctoDir, manifest, smokeTests, nightly, [[layer, layerPath]])
+    })
 }
 
 void replaceLayer(String yoctoDir, String layerName, String newPath) {
@@ -181,37 +167,57 @@ void buildManifest(String variantName, String imageName, boolean smokeTests=fals
     // Store the directory we are executed in as our workspace.
     String yoctoDir = "/home/yoctouser/pelux_yocto"
     String manifest = "pelux.xml"
+    boolean nightly = env.NIGHTLY_BUILD == "true"
 
     // Initialize code
     checkoutWithSubmodules()
+    runInVagrant({
+        innerBuildManifest(variantName, imageName, yoctoDir, manifest, smokeTests, nightly)
+    })
+}
+
+// layersToReplace is a list of lists containing layer and layerPath as strings:
+// [
+//   ["nameOfLayerToReplace1", "pathToNewLayer1"],
+//   ["nameOfLayerToReplace2", "pathToNewLayer2"]
+// ]
+void innerBuildManifest(String variantName, String imageName, String yoctoDir, String manifest,
+                        boolean smokeTests=false, boolean nightly=false, List layersToReplace=[]) {
+
+    // Initialize vagrant and repo manifest
+    repoInit(manifest)
+
+    // ReplaceLayers
+    for (List layerEntry in layersToReplace) {
+        if (layerEntry.size() < 2)  continue
+
+        String nameOfLayerToReplace = layerEntry[0]
+        String pathToNewLayer = layerEntry[1]
+        replaceLayer(yoctoDir, nameOfLayerToReplace, pathToNewLayer)
+    }
+
+    // Setup yocto
+    String templateConf="${yoctoDir}/sources/meta-pelux/conf/variant/${variantName}"
+    setupBitbake(yoctoDir, templateConf, smokeTests)
+    setupCache(yoctoDir, env.YOCTO_CACHE_URL)
+
+    boolean shouldArchive = env.ARCHIVE_CACHE == "true"
+    buildImages(yoctoDir, imageName, shouldArchive)
+}
+
+void buildImages(yoctoDir, imageName, shouldArchive) {
     try {
-        // Initialize vagrant and repo manifest
-        startVagrant()
-        repoInit(manifest)
-
-        // Setup yocto
-        String templateConf="${yoctoDir}/sources/meta-pelux/conf/variant/${variantName}"
-        setupBitbake(yoctoDir, templateConf, smokeTests)
-        setupCache(yoctoDir, env.YOCTO_CACHE_URL)
-
-        // Build the images
-        try {
-            buildImageAndSDK(yoctoDir, imageName)
-            if (smokeTests) {
-                runSmokeTests(yoctoDir, imageName)
-            }
-        } finally { // Archive cache even if there were errors.
-            boolean archive = env.ARCHIVE_CACHE == "true"
-            archiveCache(yoctoDir, archive, env.YOCTO_CACHE_ARCHIVE_PATH)
-
-            // If nightly build, we store the artifacts as well
-            boolean nightly = env.NIGHTLY_BUILD == "true"
-            if (nightly) {
-                archiveArtifacts(yoctoDir, variantName)
-            }
+        buildImageAndSDK(yoctoDir, imageName)
+        if (smokeTests) {
+            runSmokeTests(yoctoDir, imageName)
         }
-    } finally {
-        shutdownVagrant()
+    } finally { // Archive cache even if there were errors.
+        archiveCache(yoctoDir, shouldArchive, env.YOCTO_CACHE_ARCHIVE_PATH)
+
+        // If nightly build, we store the artifacts as well
+        if (nightly) {
+            archiveArtifacts(yoctoDir, variantName)
+        }
     }
 }
 
