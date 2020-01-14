@@ -20,6 +20,8 @@ void setupBitbake(String yoctoDir, String machine, List features, boolean doArch
     String featureStringList = features.join(" ")
     sh "BUILDDIR=${yoctoDir}/build /workspace/ci-scripts/select_machine_and_features ${machine} ${featureStringList}"
 
+    // TODO copy multiconfig files here if feature "acrn" is set
+
     // Add other settings that are CI specific to the local.conf
     sh "cat /workspace/conf/local.conf.appendix >> ${yoctoDir}/build/conf/local.conf"
 
